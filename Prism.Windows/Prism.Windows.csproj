@@ -6,6 +6,11 @@
   </PropertyGroup>
 
   <PropertyGroup>
+    <!-- 使用桌面 RID 格式（兼容 .NET 9 SDK） -->
+    <UseDesktopRIDFormat>true</UseDesktopRIDFormat>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
