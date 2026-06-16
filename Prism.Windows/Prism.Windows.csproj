@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon />
+    <RootNamespace>Prism.Windows</RootNamespace>
+    <AssemblyName>Prism.Windows</AssemblyName>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PakTool.Core\PakTool.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.4.240802001" />
+    <PackageReference Include="Microsoft.WindowsAPICodePack-Shell" Version="1.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\third_party\lib\win-x64\*.dll" Link="third_party\lib\win-x64\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\third_party\lib\win-x64\')" />
+  </ItemGroup>
+
+</Project>

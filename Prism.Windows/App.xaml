@@ -1,0 +1,17 @@
+<Application x:Class="Prism.Windows.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Prism.Windows">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <SolidColorBrush x:Key="LightBackgroundBrush" Color="#F5F5F5" />
+            <SolidColorBrush x:Key="LightSurfaceBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="PrimaryBrush" Color="#0078D4" />
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#1A1A1A" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#666666" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
