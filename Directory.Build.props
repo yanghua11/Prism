@@ -1,0 +1,26 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- 统一版本号：与主版本对齐 -->
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <!-- CI 构建号注入 -->
+    <VersionSuffix Condition="'$(CI_BUILD_NUMBER)' != ''">$(CI_BUILD_NUMBER)</VersionSuffix>
+
+    <!-- 全局 .NET 风格：允许 null；使用隐式 using -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- CI 环境：避免在无签名证书时打包失败 -->
+    <AppxPackageSigningEnabled Condition="'$(CI)' == 'true'">false</AppxPackageSigningEnabled>
+    <PackageCertificateThumbprint Condition="'$(CI)' == 'true'"></PackageCertificateThumbprint>
+
+    <!-- 确定产物路径统一到 artifacts/ -->
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <BaseIntermediateOutputPath Condition="'$(CI)' == 'true'">$(ArtifactsPath)obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="'$(CI)' == 'true'">$(ArtifactsPath)bin/$(MSBuildProjectName)/</BaseOutputPath>
+
+    <!-- 确定性构建 -->
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>

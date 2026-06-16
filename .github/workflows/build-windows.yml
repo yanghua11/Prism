@@ -1,0 +1,218 @@
+name: Build Prism.Windows
+
+# 触发条件：推送到 main / 其他分支，以及手动触发
+on:
+  push:
+    branches:
+      - main
+      - trae/**
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "8.0.x"
+  PROJECT_PATH: "Prism.Windows/Prism.Windows.csproj"
+  CONFIGURATION: "Release"
+  RUNTIME_IDENTIFIER: "win-x64"
+
+jobs:
+
+  # ---------- 1. 构建 & 打包 WinUI 3 桌面应用 ----------
+  build-windows:
+    name: Build (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive      # 拉取 external/CUE4Parse 子模块
+          fetch-depth: 0
+
+      - name: Setup .NET SDK ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Show dotnet info
+        run: dotnet --info
+
+      - name: Restore NuGet packages
+        run: dotnet restore "${{ env.PROJECT_PATH }}"
+
+      - name: Build
+        run: >
+          dotnet build "${{ env.PROJECT_PATH }}"
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ env.RUNTIME_IDENTIFIER }}
+          --no-restore
+          --nologo
+
+      # --- 2a. Framework-dependent 版本（体积小，需用户安装 .NET 8 Desktop Runtime + Windows App SDK Runtime） ---
+      - name: Publish (Framework-dependent)
+        run: >
+          dotnet publish "${{ env.PROJECT_PATH }}"
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ env.RUNTIME_IDENTIFIER }}
+          --self-contained false
+          -p:PublishSingleFile=false
+          --nologo
+          -o ${{ runner.temp }}/publish-fx
+
+      - name: Upload Framework-dependent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism.Windows-${{ env.RUNTIME_IDENTIFIER }}-framework-dependent
+          path: ${{ runner.temp }}/publish-fx/**
+          if-no-files-found: error
+          compression-level: 9
+
+      # --- 2b. Self-contained 版本（体积大，仅需 Windows App SDK Runtime） ---
+      - name: Publish (Self-contained)
+        run: >
+          dotnet publish "${{ env.PROJECT_PATH }}"
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ env.RUNTIME_IDENTIFIER }}
+          --self-contained true
+          -p:PublishSingleFile=false
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          --nologo
+          -o ${{ runner.temp }}/publish-sc
+
+      - name: Upload Self-contained artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism.Windows-${{ env.RUNTIME_IDENTIFIER }}-self-contained
+          path: ${{ runner.temp }}/publish-sc/**
+          if-no-files-found: error
+          compression-level: 9
+
+      # --- 2c. PublishSingleFile 版（单个 .exe） ---
+      - name: Publish (Single-file, Self-contained)
+        run: >
+          dotnet publish "${{ env.PROJECT_PATH }}"
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ env.RUNTIME_IDENTIFIER }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          --nologo
+          -o ${{ runner.temp }}/publish-single
+
+      - name: Upload Single-file artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Prism.Windows-${{ env.RUNTIME_IDENTIFIER }}-singlefile
+          path: ${{ runner.temp }}/publish-single/**
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Build summary
+        run: |
+          Write-Host "=== Build outputs ==="
+          Write-Host "project: ${{ env.PROJECT_PATH }}"
+          Write-Host "config:  ${{ env.CONFIGURATION }}"
+          Write-Host "rid:     ${{ env.RUNTIME_IDENTIFIER }}"
+          Write-Host "done."
+
+  # ---------- 2. 可选：构建跨平台 CLI（作为对照验证） ----------
+  build-cli:
+    name: Build PakTool.Cli (All platforms)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET ${{ env.DOTNET_VERSION }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build PakTool.Cli
+        run: dotnet build "PakTool.Cli/PakTool.Cli.csproj" -c Release --nologo
+
+  # ---------- 3. 仅在 main 分支 push 时发布 Release Draft ----------
+  release:
+    name: Release Draft
+    needs: build-windows
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Framework-dependent
+        uses: actions/download-artifact@v4
+        with:
+          name: Prism.Windows-win-x64-framework-dependent
+          path: ./artifacts/fx
+
+      - name: Download Self-contained
+        uses: actions/download-artifact@v4
+        with:
+          name: Prism.Windows-win-x64-self-contained
+          path: ./artifacts/sc
+
+      - name: Download Single-file
+        uses: actions/download-artifact@v4
+        with:
+          name: Prism.Windows-win-x64-singlefile
+          path: ./artifacts/single
+
+      - name: Create zip packages
+        run: |
+          cd ./artifacts
+          zip -r -9 ../Prism.Windows-win-x64-framework-dependent.zip fx/
+          zip -r -9 ../Prism.Windows-win-x64-self-contained.zip sc/
+          zip -r -9 ../Prism.Windows-win-x64-singlefile.zip single/
+          cd ..
+          ls -lh *.zip
+
+      - name: Create Release Draft
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Build ${{ github.sha }} — Prism.Windows"
+          tag_name: "auto-build-${{ github.run_id }}"
+          draft: true
+          prerelease: true
+          body: |
+            # Auto-generated build
+
+            This draft release was produced automatically by GitHub Actions.
+
+            **Commit:** ${{ github.sha }}
+            **Run:** ${{ github.run_id }}
+
+            ## Downloads
+
+            - **Framework-dependent** (small, requires .NET 8 Desktop Runtime + Windows App SDK Runtime): `Prism.Windows-win-x64-framework-dependent.zip`
+            - **Self-contained** (large, only requires Windows App SDK Runtime): `Prism.Windows-win-x64-self-contained.zip`
+            - **Single-file** (single .exe, only requires Windows App SDK Runtime): `Prism.Windows-win-x64-singlefile.zip`
+
+            ## How to run
+
+            1. Download the zip file matching your preference
+            2. Extract it on a Windows 10 1809+ / Windows 11 machine
+            3. Run `Prism.Windows.exe`
+
+            If the app fails to start because the Windows App SDK Runtime is not installed, install it from:
+            https://docs.microsoft.com/windows/apps/windows-app-sdk/downloads
+
+          files: |
+            Prism.Windows-win-x64-framework-dependent.zip
+            Prism.Windows-win-x64-self-contained.zip
+            Prism.Windows-win-x64-singlefile.zip
+
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

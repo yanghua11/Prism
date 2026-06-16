@@ -4,8 +4,10 @@ using Microsoft.WindowsAPICodePack.Dialogs;
 using PakTool.Core;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System;
 
 namespace Prism.Windows;
 
@@ -24,7 +26,24 @@ public sealed partial class MainWindow : Window
         FileListView.SelectionChanged += OnFileSelectionChanged;
         ExportRawButton.Click += OnExportRawClick;
         ExportPngButton.Click += OnExportPngClick;
+
+        Closed += OnWindowClosed;
     }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        try
+        {
+            _cts?.Cancel();
+            _session?.DisposeAsync().AsTask().Wait(500);
+        }
+        catch
+        {
+            // 忽略关闭时的异常
+        }
+    }
+
+    // ---------- UI helpers ----------
 
     private static string FormatBytes(long bytes)
     {
@@ -35,39 +54,43 @@ public sealed partial class MainWindow : Window
         return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
     }
 
+    private void RunOnUI(Action action)
+    {
+        var dq = DispatcherQueue;
+        if (dq == null)
+        {
+            action();
+            return;
+        }
+        dq.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () =>
+        {
+            try { action(); }
+            catch (Exception ex) { Debug.WriteLine($"[UI] {ex.Message}"); }
+        });
+    }
+
     private void AddDiagnostic(string channel, string message)
     {
         var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
         var line = $"[{timestamp}] [{channel}] {message}";
-        DispatcherQueue.TryEnqueue(() =>
+        RunOnUI(() =>
         {
-            DiagnosticsLog.Text = DiagnosticsLog.Text + line + Environment.NewLine;
+            DiagnosticsLog.Text += line + Environment.NewLine;
         });
         Debug.WriteLine(line);
     }
 
     private void SetStatus(string text)
     {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            StatusText.Text = text;
-        });
+        RunOnUI(() => StatusText.Text = text);
     }
 
     private void SetBusy(bool busy, string? status = null)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        RunOnUI(() =>
         {
-            if (busy)
-            {
-                ProgressBar.IsIndeterminate = true;
-                ProgressBar.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                ProgressBar.Visibility = Visibility.Collapsed;
-            }
-
+            ProgressBar.IsIndeterminate = busy;
+            ProgressBar.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             if (status != null)
             {
                 StatusText.Text = status;
@@ -75,42 +98,51 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private async void OnSelectPakClick(object sender, RoutedEventArgs e)
+    // ---------- File selection ----------
+
+    private void OnSelectPakClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new CommonOpenFileDialog
+        using var dialog = new CommonOpenFileDialog
         {
             Title = "Select Pak File",
             IsFolderPicker = false,
-            Multiselect = false,
-            Filters = { new CommonFileDialogFilter("Pak Files", "*.pak") }
+            Multiselect = false
         };
+        dialog.Filters.Add(new CommonFileDialogFilter("Pak Files", "*.pak"));
+        dialog.Filters.Add(new CommonFileDialogFilter("All Files", "*.*"));
 
         if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
         {
             _pakPath = dialog.FileName;
-            PakPathTextBox.Text = System.IO.Path.GetFileName(_pakPath);
-            OpenPakButton.IsEnabled = !string.IsNullOrEmpty(_pakPath);
+            RunOnUI(() =>
+            {
+                PakPathTextBox.Text = Path.GetFileName(_pakPath);
+                OpenPakButton.IsEnabled = !string.IsNullOrEmpty(_pakPath);
+            });
             AddDiagnostic("INFO", $"Selected pak: {_pakPath}");
         }
     }
 
-    private async void OnSelectUsmapClick(object sender, RoutedEventArgs e)
+    private void OnSelectUsmapClick(object sender, RoutedEventArgs e)
     {
-        var dialog = new CommonOpenFileDialog
+        using var dialog = new CommonOpenFileDialog
         {
             Title = "Select Usmap File",
             IsFolderPicker = false,
-            Multiselect = false,
-            Filters = { new CommonFileDialogFilter("Usmap Files", "*.usmap") }
+            Multiselect = false
         };
+        dialog.Filters.Add(new CommonFileDialogFilter("Usmap Files", "*.usmap"));
+        dialog.Filters.Add(new CommonFileDialogFilter("All Files", "*.*"));
 
         if (dialog.ShowDialog() == CommonFileDialogResult.Ok)
         {
             _usmapPath = dialog.FileName;
-            UsmapPathTextBox.Text = System.IO.Path.GetFileName(_usmapPath);
+            RunOnUI(() => UsmapPathTextBox.Text = Path.GetFileName(_usmapPath));
             AddDiagnostic("INFO", $"Selected usmap: {_usmapPath}");
         }
     }
+
+    // ---------- Open pak ----------
 
     private async void OnOpenPakClick(object sender, RoutedEventArgs e)
     {
@@ -130,18 +162,18 @@ public sealed partial class MainWindow : Window
             _session = new PakArchiveSession();
             var aesKey = NormalizeAesKey(AesKeyTextBox.Text);
             var options = new PakOpenOptions(
-                new[] { _pakPath },
-                aesKey,
-                _usmapPath,
+                PakPaths: new[] { _pakPath },
+                AesKeyHex: aesKey,
+                UsmapPath: _usmapPath,
                 DecodeLogger: LogDecode
             );
 
-            var cts = new CancellationTokenSource();
             _cts?.Dispose();
-            _cts = cts;
+            _cts = new CancellationTokenSource();
 
-            PakOpenResult? result = null;
-            result = await Task.Run(() => _session.OpenAsync(options, cts.Token), cts.Token);
+            var result = await Task.Run(
+                () => _session.OpenAsync(options, _cts.Token),
+                _cts.Token);
 
             foreach (var timing in result.Timings)
             {
@@ -170,6 +202,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- Navigation ----------
+
     private async Task NavigateToAsync(string folder)
     {
         if (_session == null) return;
@@ -179,10 +213,12 @@ public sealed partial class MainWindow : Window
             SetBusy(true, "Loading directory...");
             _currentFolder = folder;
 
-            var entries = await Task.Run(() => _session.ListAsync(folder), _cts?.Token ?? CancellationToken.None);
+            var entries = await Task.Run(
+                () => _session.ListAsync(folder),
+                _cts?.Token ?? CancellationToken.None);
             _entries = entries;
 
-            await DispatcherQueue.EnqueueAsync(() =>
+            RunOnUI(() =>
             {
                 PathBreadcrumb.Text = string.IsNullOrEmpty(folder) ? "/" : folder;
                 GoUpButton.IsEnabled = !string.IsNullOrEmpty(folder);
@@ -208,10 +244,11 @@ public sealed partial class MainWindow : Window
     private async void OnGoUpClick(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrEmpty(_currentFolder)) return;
-
         var parent = GetParentPath(_currentFolder);
         await NavigateToAsync(parent);
     }
+
+    // ---------- Search ----------
 
     private async void OnSearchClick(object sender, RoutedEventArgs e)
     {
@@ -233,9 +270,11 @@ public sealed partial class MainWindow : Window
             SetBusy(true, "Searching...");
             AddDiagnostic("INFO", $"Searching for: {query}");
 
-            var results = await Task.Run(() => _session.SearchAsync(query, 500), _cts?.Token ?? CancellationToken.None);
+            var results = await Task.Run(
+                () => _session.SearchAsync(query, 500),
+                _cts?.Token ?? CancellationToken.None);
 
-            await DispatcherQueue.EnqueueAsync(() =>
+            RunOnUI(() =>
             {
                 FileListView.ItemsSource = CreateEntryViewModels(results);
                 PathBreadcrumb.Text = $"Search: {query} ({results.Count} results)";
@@ -255,28 +294,33 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- Selection ----------
+
     private void OnFileSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (FileListView.SelectedItem is EntryViewModel selected)
         {
             var entry = selected.Entry;
-            SelectedItemSummary.Text = entry.IsDirectory
-                ? $"{entry.Name}/"
-                : $"{entry.FullPath} ({FormatBytes(entry.Size)}{(entry.IsEncrypted ? " [encrypted]" : "")})";
+            RunOnUI(() =>
+            {
+                SelectedItemSummary.Text = entry.IsDirectory
+                    ? $"{entry.Name}/"
+                    : $"{entry.FullPath} ({FormatBytes(entry.Size)}{(entry.IsEncrypted ? " [encrypted]" : "")})";
 
-            ExportRawButton.IsEnabled = !entry.IsDirectory;
-            ExportPngButton.IsEnabled = !entry.IsDirectory && (entry.IsAssetPackage || IsTextureExtension(entry.Extension));
-
+                ExportRawButton.IsEnabled = !entry.IsDirectory;
+                ExportPngButton.IsEnabled = !entry.IsDirectory && (entry.IsAssetPackage || IsTextureExtension(entry.Extension));
+            });
             _selectedEntry = entry;
-            TexturePreviewImage.Source = null;
         }
     }
+
+    // ---------- Export ----------
 
     private async void OnExportRawClick(object sender, RoutedEventArgs e)
     {
         if (_selectedEntry == null || _session == null) return;
 
-        var dialog = new CommonOpenFileDialog
+        using var dialog = new CommonOpenFileDialog
         {
             Title = "Select Output Directory",
             IsFolderPicker = true,
@@ -284,7 +328,6 @@ public sealed partial class MainWindow : Window
         };
 
         if (dialog.ShowDialog() != CommonFileDialogResult.Ok) return;
-
         var outputDir = dialog.FileName;
 
         try
@@ -299,8 +342,8 @@ public sealed partial class MainWindow : Window
             int count = 0;
             foreach (var (path, data) in files)
             {
-                var fileName = System.IO.Path.GetFileName(path);
-                var outputPath = System.IO.Path.Combine(outputDir, fileName);
+                var fileName = Path.GetFileName(path);
+                var outputPath = Path.Combine(outputDir, fileName);
                 await File.WriteAllBytesAsync(outputPath, data);
                 count++;
             }
@@ -323,7 +366,7 @@ public sealed partial class MainWindow : Window
     {
         if (_selectedEntry == null || _session == null) return;
 
-        var dialog = new CommonOpenFileDialog
+        using var dialog = new CommonOpenFileDialog
         {
             Title = "Select Output Directory",
             IsFolderPicker = true,
@@ -331,7 +374,6 @@ public sealed partial class MainWindow : Window
         };
 
         if (dialog.ShowDialog() != CommonFileDialogResult.Ok) return;
-
         var outputDir = dialog.FileName;
 
         try
@@ -350,8 +392,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            var fileName = System.IO.Path.GetFileNameWithoutExtension(_selectedEntry.Name) + ".png";
-            var outputPath = System.IO.Path.Combine(outputDir, fileName);
+            var fileName = Path.GetFileNameWithoutExtension(_selectedEntry.Name) + ".png";
+            var outputPath = Path.Combine(outputDir, fileName);
             await File.WriteAllBytesAsync(outputPath, preview.PngData);
 
             SetStatus($"Exported {fileName} ({preview.Width}x{preview.Height}).");
@@ -372,6 +414,8 @@ public sealed partial class MainWindow : Window
             SetBusy(false);
         }
     }
+
+    // ---------- Helpers ----------
 
     private void LogDecode(string message)
     {
@@ -399,11 +443,11 @@ public sealed partial class MainWindow : Window
 
     private static bool IsTextureExtension(string extension)
     {
-        var ext = extension.ToLowerInvariant();
+        var ext = (extension ?? string.Empty).ToLowerInvariant();
         return ext is ".uasset" or ".umap" or ".png" or ".jpg" or ".jpeg" or ".bmp" or ".tga";
     }
 
-    private ObservableCollection<EntryViewModel> CreateEntryViewModels(IReadOnlyList<ArchiveEntryDto> entries)
+    private static ObservableCollection<EntryViewModel> CreateEntryViewModels(IReadOnlyList<ArchiveEntryDto> entries)
     {
         var models = new ObservableCollection<EntryViewModel>();
         foreach (var entry in entries)
@@ -423,6 +467,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- State ----------
+
     private CancellationTokenSource? _cts;
     private string? _pakPath;
     private string? _usmapPath;
@@ -441,20 +487,21 @@ public sealed class EntryViewModel
 
     public ArchiveEntryDto Entry { get; }
 
-    public string Icon => Entry.IsDirectory ? "📁" : GetFileIcon(Entry.Extension);
+    public string Icon => Entry.IsDirectory ? "Folder" : GetFileIcon(Entry.Extension);
     public string DisplayName => Entry.Name + (Entry.IsDirectory ? "/" : "");
     public string SizeDisplay => Entry.IsDirectory ? "" : FormatBytesStatic(Entry.Size);
 
     private static string GetFileIcon(string extension)
     {
-        return extension.ToLowerInvariant() switch
+        var ext = (extension ?? string.Empty).ToLowerInvariant();
+        return ext switch
         {
-            ".uasset" or ".umap" => "🎨",
-            ".png" or ".jpg" or ".jpeg" or ".bmp" or ".tga" => "🖼️",
-            ".wav" or ".ogg" or ".mp3" => "🎵",
-            ".u" or ".uc" => "📜",
-            ".ini" or ".cfg" => "⚙️",
-            _ => "📄"
+            ".uasset" or ".umap" => "Asset",
+            ".png" or ".jpg" or ".jpeg" or ".bmp" or ".tga" => "Image",
+            ".wav" or ".ogg" or ".mp3" => "Audio",
+            ".u" or ".uc" => "Script",
+            ".ini" or ".cfg" => "Config",
+            _ => "File"
         };
     }
 

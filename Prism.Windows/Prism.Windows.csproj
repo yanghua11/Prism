@@ -3,13 +3,30 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <ApplicationIcon />
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>Prism.Windows</RootNamespace>
     <AssemblyName>Prism.Windows</AssemblyName>
+    <ApplicationIcon />
+    <StartupObject />
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- WinUI 3 桌面应用（非 MSIX 包） -->
+    <UseWinUI>true</UseWinUI>
     <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <WindowsPackageType>None</WindowsPackageType>
+    <GenerateLibraryLayout>false</GenerateLibraryLayout>
+    <GenerateTestArtifacts>false</GenerateTestArtifacts>
+
+    <!-- CI 优化：禁用 MSIX 打包，避免需要证书 -->
+    <AppxBundle>Never</AppxBundle>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <EnablePreviewMsixTooling>false</EnablePreviewMsixTooling>
+
+    <!-- 发布属性：用于 single-file &amp; self-contained 发布 -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

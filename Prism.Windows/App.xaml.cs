@@ -1,8 +1,8 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using System.Diagnostics;
+using System;
+using System.IO;
 using System.Runtime.InteropServices;
-using CUE4Parse.Compression;
+using System.Diagnostics;
 
 namespace Prism.Windows;
 
@@ -23,49 +23,66 @@ public sealed partial class App : Application
 
     private static void EnsureBundledOodleInitialized()
     {
-        var libDir = Path.Combine("..", "third_party", "lib", "win-x64");
-        if (!Directory.Exists(libDir))
+        // 按照 spec.md 中的描述，扫描第三方目录中的 Oodle DLL。
+        // 注意：这是一个 "best effort" 的初始化。没有 DLL 也不会阻止应用启动，
+        // 只是使用 Oodle 压缩的 pak 条目无法读取。
+        var candidates = new[]
         {
-            Debug.WriteLine("[Oodle] Bundled Oodle library directory does not exist.");
-            return;
-        }
+            Path.Combine(AppContext.BaseDirectory, "third_party", "lib", "win-x64"),
+            Path.Combine(Environment.CurrentDirectory, "third_party", "lib", "win-x64"),
+            Path.Combine("..", "third_party", "lib", "win-x64"),
+        };
 
         string[] dllNames =
-        [
+        {
             "oo2core_win64_9_2.dll",
             "oo2core_win64_9_1.dll",
             "oo2core_win64_9_0.dll",
             "oo2core_win64_8_0.dll",
             "oo2core_win64_7_0.dll",
             "oo2core_win64_6_0.dll",
+            "oo2core_win64.dll",
             "liboodle-data-shared.dll",
-        ];
+        };
 
-        foreach (var dllName in dllNames)
+        foreach (var dir in candidates)
         {
-            var dllPath = Path.Combine(libDir, dllName);
-            if (File.Exists(dllPath))
+            if (!Directory.Exists(dir)) continue;
+
+            foreach (var dllName in dllNames)
             {
+                var dllPath = Path.Combine(dir, dllName);
+                if (!File.Exists(dllPath)) continue;
+
                 try
                 {
-                    var handle = NativeLibrary.TryLoad(dllPath, out var libHandle);
-                    if (handle)
+                    if (NativeLibrary.TryLoad(dllPath, out var handle))
                     {
-                        Debug.WriteLine($"[Oodle] Native library loaded from: {dllPath}");
-                        OodleHelper.Initialize(new OodleDotNet.Oodle(libHandle));
-                        Debug.WriteLine("[Oodle] Oodle native initialized from bundled native library.");
-                        return;
+                        // 尝试初始化 Oodle（PakTool.Core / CUE4Parse 内部使用）
+                        try
+                        {
+                            CUE4Parse.Compression.OodleHelper.Initialize(new OodleDotNet.Oodle(handle));
+                            Debug.WriteLine($"[Oodle] Initialized from: {dllPath}");
+                            m_oodleStatus = $"Loaded from {Path.GetFileName(dllPath)}";
+                            return;
+                        }
+                        catch (Exception inner)
+                        {
+                            Debug.WriteLine($"[Oodle] Loaded DLL but failed to wire: {inner.Message}");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[Oodle] Failed to load {dllName}: {ex.Message}");
+                    Debug.WriteLine($"[Oodle] Failed to load {dllPath}: {ex.Message}");
                 }
             }
         }
 
-        Debug.WriteLine("[Oodle] Bundled Oodle native library is not available. Oodle-compressed entries will not be readable.");
+        m_oodleStatus = "Oodle native library not found — Oodle-compressed entries cannot be read.";
+        Debug.WriteLine($"[Oodle] {m_oodleStatus}");
     }
 
+    private static string m_oodleStatus = "Not checked.";
     private Window? m_window;
 }
