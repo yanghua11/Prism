@@ -1,5 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <PropertyGroup>
+    <!-- 强制只使用本地 NuGet 包缓存 -->
+    <NuGetPackageFolders>C:\Users\Administrator\.nuget\packages\</NuGetPackageFolders>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\external\CUE4Parse\CUE4Parse\CUE4Parse.csproj" />
     <ProjectReference Include="..\external\CUE4Parse\CUE4Parse-Conversion\CUE4Parse-Conversion.csproj" />
