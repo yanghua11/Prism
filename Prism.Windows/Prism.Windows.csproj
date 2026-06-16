@@ -8,12 +8,16 @@
   <PropertyGroup>
     <!-- 使用桌面 RID 格式（兼容 .NET 9 SDK） -->
     <UseDesktopRIDFormat>true</UseDesktopRIDFormat>
+    <!-- 显式定义 RID 别名映射 -->
+    <RuntimeIdentifierAliases>win10-x64;win-x64;win10-x86;win-x86;win10-arm;win-arm;win10-arm64-aot;win-arm64</RuntimeIdentifierAliases>
   </PropertyGroup>
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
     <RootNamespace>Prism.Windows</RootNamespace>
     <AssemblyName>Prism.Windows</AssemblyName>
     <ApplicationIcon />
